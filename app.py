@@ -93,7 +93,7 @@ if "secret" not in st.session_state:
     st.session_state.secret = random.randint(low, high)
 
 if "attempts" not in st.session_state:
-    st.session_state.attempts = 1
+    st.session_state.attempts = 0
 
 if "score" not in st.session_state:
     st.session_state.score = 0
@@ -106,10 +106,10 @@ if "history" not in st.session_state:
 
 st.subheader("Make a guess")
 
-st.info(
-    f"Guess a number between 1 and 100. "
-    f"Attempts left: {attempt_limit - st.session_state.attempts}"
-)
+# Bug 1: reserve a spot for the "Attempts left" message and fill it AFTER the
+# guess is processed. Streamlit reruns top-to-bottom, so drawing it here drew
+# the count before it was incremented, leaving it a click behind.
+attempts_box = st.empty()
 
 with st.expander("Developer Debug Info"):
     st.write("Secret:", st.session_state.secret)
@@ -186,6 +186,14 @@ if submit:
                     f"The secret was {st.session_state.secret}. "
                     f"Score: {st.session_state.score}"
                 )
+
+# Bug 1: fill the reserved box now, after the guess was counted, so the
+# displayed count reflects this turn instead of the previous one.
+attempts_left = max(0, attempt_limit - st.session_state.attempts)
+attempts_box.info(
+    f"Guess a number between {low} and {high}. "
+    f"Attempts left: {attempts_left}"
+)
 
 st.divider()
 st.caption("Built by an AI that claims this code is production-ready.")
