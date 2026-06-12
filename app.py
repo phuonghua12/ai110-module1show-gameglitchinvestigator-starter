@@ -1,61 +1,16 @@
 import random
 import streamlit as st
 
-def get_range_for_difficulty(difficulty: str):
-    if difficulty == "Easy":
-        return 1, 20
-    if difficulty == "Normal":
-        return 1, 100
-    if difficulty == "Hard":
-        return 1, 50
-    return 1, 100
-
-
-def parse_guess(raw: str):
-    if raw is None:
-        return False, None, "Enter a guess."
-
-    if raw == "":
-        return False, None, "Enter a guess."
-
-    try:
-        if "." in raw:
-            value = int(float(raw))
-        else:
-            value = int(raw)
-    except Exception:
-        return False, None, "That is not a number."
-
-    return True, value, None
-
-
-def check_guess(guess, secret):
-    # Bug 3: the hint text was swapped — "Too High" must tell the player to go
-    # LOWER (and vice versa). The TypeError fallback that compared strings is
-    # gone now that the caller always passes the real int secret.
-    if guess == secret:
-        return "Win", "🎉 Correct!"
-    if guess > secret:
-        return "Too High", "📉 Go LOWER!"
-    return "Too Low", "📈 Go HIGHER!"
-
-
-def update_score(current_score: int, outcome: str, attempt_number: int):
-    if outcome == "Win":
-        points = 100 - 10 * (attempt_number + 1)
-        if points < 10:
-            points = 10
-        return current_score + points
-
-    if outcome == "Too High":
-        if attempt_number % 2 == 0:
-            return current_score + 5
-        return current_score - 5
-
-    if outcome == "Too Low":
-        return current_score - 5
-
-    return current_score
+# FIX: Refactored the game logic out of app.py into logic_utils.py using
+# Claude Code agent mode. I described the bugs; the AI proposed splitting
+# check_guess (decision) from hint_message (UI text) so the tests stay green.
+from logic_utils import (
+    get_range_for_difficulty,
+    parse_guess,
+    check_guess,
+    hint_message,
+    update_score,
+)
 
 st.set_page_config(page_title="Glitchy Guesser", page_icon="🎮")
 
@@ -85,6 +40,9 @@ st.sidebar.caption(f"Attempts allowed: {attempt_limit}")
 if "secret" not in st.session_state:
     st.session_state.secret = random.randint(low, high)
 
+# FIX (Bug 1): start the counter at 0 (no attempts made yet), not 1.
+# I reported "Attempts left didn't drop on the first guess"; the AI traced
+# it to the wrong initial value plus the render-order issue handled below.
 if "attempts" not in st.session_state:
     st.session_state.attempts = 0
 
@@ -99,9 +57,10 @@ if "history" not in st.session_state:
 
 st.subheader("Make a guess")
 
-# Bug 1: reserve a spot for the "Attempts left" message and fill it AFTER the
-# guess is processed. Streamlit reruns top-to-bottom, so drawing it here drew
-# the count before it was incremented, leaving it a click behind.
+# FIX (Bug 1): reserve a spot for the "Attempts left" message. The AI
+# explained that Streamlit reran the script top-to-bottom and drew this
+# message *before* the counter was incremented, so it always lagged a click
+# behind. Using st.empty() lets us fill it *after* the guess is processed.
 attempts_box = st.empty()
 
 with st.expander("Developer Debug Info"):
@@ -125,9 +84,10 @@ with col3:
     show_hint = st.checkbox("Show hint", value=True)
 
 if new_game:
-    # Bug 2: a new game must reset ALL game state. Previously only the secret
-    # and attempts were reset, so status stayed "won"/"lost" and the game-over
-    # guard immediately stopped the fresh game ("New Game did nothing").
+    # FIX (Bug 2): a new game must reset ALL game state, including status,
+    # score, and history. I reported "New Game does nothing"; the AI found
+    # that status stayed "won"/"lost", so the game-over guard immediately
+    # stopped the fresh game. Resetting every key fixes it.
     st.session_state.secret = random.randint(low, high)
     st.session_state.attempts = 0
     st.session_state.score = 0
@@ -148,13 +108,14 @@ if submit and st.session_state.status == "playing":
     else:
         st.session_state.history.append(guess_int)
 
-        # Bug 3 (root cause): always compare against the real int secret. The
-        # old code cast the secret to str on even attempts, forcing a text
-        # comparison ("9" > "50") that flipped the hints every other turn.
-        outcome, message = check_guess(guess_int, st.session_state.secret)
+        # FIX (Bug 3, root cause): always compare against the real int secret.
+        # I reported "hints are backwards"; the AI spotted that the old code
+        # turned the secret into a string on even attempts, forcing a text
+        # comparison ("9" > "50") that flipped the hints on alternating turns.
+        outcome = check_guess(guess_int, st.session_state.secret)
 
         if show_hint:
-            st.warning(message)
+            st.warning(hint_message(outcome))
 
         st.session_state.score = update_score(
             current_score=st.session_state.score,
@@ -169,25 +130,23 @@ if submit and st.session_state.status == "playing":
                 f"You won! The secret was {st.session_state.secret}. "
                 f"Final score: {st.session_state.score}"
             )
-        else:
-            if st.session_state.attempts >= attempt_limit:
-                st.session_state.status = "lost"
-                st.error(
-                    f"Out of attempts! "
-                    f"The secret was {st.session_state.secret}. "
-                    f"Score: {st.session_state.score}"
-                )
+        elif st.session_state.attempts >= attempt_limit:
+            st.session_state.status = "lost"
+            st.error(
+                f"Out of attempts! "
+                f"The secret was {st.session_state.secret}. "
+                f"Score: {st.session_state.score}"
+            )
 
-# Bug 1: fill the reserved box now, after the guess was counted, so the
-# displayed count reflects this turn instead of the previous one.
+# FIX (Bug 1): fill the reserved box now, after the guess was counted, so
+# the displayed count reflects this turn instead of the previous one.
 attempts_left = max(0, attempt_limit - st.session_state.attempts)
 attempts_box.info(
     f"Guess a number between {low} and {high}. "
     f"Attempts left: {attempts_left}"
 )
 
-# Bug 2: show a standing message if the game is already over, but without
-# st.stop() so the New Game button can still reset and start a fresh game.
+# Show a standing message if the game is already over.
 if st.session_state.status == "won":
     st.success("You already won. Start a new game to play again.")
 elif st.session_state.status == "lost":
