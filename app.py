@@ -30,21 +30,14 @@ def parse_guess(raw: str):
 
 
 def check_guess(guess, secret):
+    # Bug 3: the hint text was swapped — "Too High" must tell the player to go
+    # LOWER (and vice versa). The TypeError fallback that compared strings is
+    # gone now that the caller always passes the real int secret.
     if guess == secret:
         return "Win", "🎉 Correct!"
-
-    try:
-        if guess > secret:
-            return "Too High", "📈 Go HIGHER!"
-        else:
-            return "Too Low", "📉 Go LOWER!"
-    except TypeError:
-        g = str(guess)
-        if g == secret:
-            return "Win", "🎉 Correct!"
-        if g > secret:
-            return "Too High", "📈 Go HIGHER!"
-        return "Too Low", "📉 Go LOWER!"
+    if guess > secret:
+        return "Too High", "📉 Go LOWER!"
+    return "Too Low", "📈 Go HIGHER!"
 
 
 def update_score(current_score: int, outcome: str, attempt_number: int):
@@ -155,12 +148,10 @@ if submit and st.session_state.status == "playing":
     else:
         st.session_state.history.append(guess_int)
 
-        if st.session_state.attempts % 2 == 0:
-            secret = str(st.session_state.secret)
-        else:
-            secret = st.session_state.secret
-
-        outcome, message = check_guess(guess_int, secret)
+        # Bug 3 (root cause): always compare against the real int secret. The
+        # old code cast the secret to str on even attempts, forcing a text
+        # comparison ("9" > "50") that flipped the hints every other turn.
+        outcome, message = check_guess(guess_int, st.session_state.secret)
 
         if show_hint:
             st.warning(message)
